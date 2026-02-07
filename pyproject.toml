@@ -1,0 +1,33 @@
+[project]
+name = "halo"
+version = "0.1.0"
+description = "Halo MVP backend and shared tooling"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
+]
+
+[dependency-groups]
+dev = [
+  "httpx>=0.25",
+  "pytest>=7.4",
+  "ruff>=0.6",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["services", "packages", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+testpaths = ["services/api/tests", "services/worker/tests"]
+pythonpath = ["."]
+addopts = "-q"
