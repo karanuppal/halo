@@ -1,0 +1,1 @@
+"""Shared intent schema placeholder."""
