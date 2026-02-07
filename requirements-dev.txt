@@ -1,4 +1,0 @@
--r requirements.txt
-pytest>=7.4
-ruff>=0.6.0
-httpx>=0.25

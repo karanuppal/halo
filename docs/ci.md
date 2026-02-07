@@ -19,3 +19,10 @@ In GitHub repo settings:
 - Create feature branches prefixed with `codex/`
 - Rebase onto `main` before merge
 - No direct pushes to `main`
+
+## Local Dev (uv)
+
+- Install deps: `uv sync --group dev`
+- Lint: `uv run ruff check .`
+- Format check: `uv run ruff format --check .`
+- Tests: `uv run pytest`
