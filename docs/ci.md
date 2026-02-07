@@ -32,22 +32,19 @@ Required repo setting:
 - Settings → Actions → General → Workflow permissions
   - Allow GitHub Actions to create and approve pull requests
 
-### CI Status Publisher
+## Local Pre-Push CI
 
-A workflow publishes CI results to the `ci-status` branch as JSON files:
-- `status/<commit-sha>.json`
+A pre-push hook runs lint, format check, and tests locally to reduce CI failures.
 
-Local helper to wait on CI for a commit:
+Hook setup (already configured in this repo):
+- `.githooks/pre-push`
+- `git config core.hooksPath .githooks`
+
+If you clone the repo elsewhere, run:
 
 ```bash
-./scripts/ci_wait.sh <commit-sha>
+git config core.hooksPath .githooks
 ```
-
-## Local Workflow
-
-- Create feature branches prefixed with `codex/`
-- No direct pushes to `main`
-- Auto PR + auto merge handles integration once CI is green
 
 ## Local Dev (uv)
 
