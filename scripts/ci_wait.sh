@@ -7,8 +7,8 @@ if [[ $# -lt 1 ]]; then
 fi
 
 SHA="$1"
-TIMEOUT="${2:-600}"
-INTERVAL=10
+TIMEOUT="${2:-120}"
+INTERVAL=60
 REMOTE="origin"
 BRANCH="ci-status"
 END=$((SECONDS + TIMEOUT))
