@@ -3,7 +3,6 @@ from __future__ import annotations
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
-
 from services.api.app.models.order import (
     OrderConfirmRequest,
     OrderConfirmResponse,
@@ -13,7 +12,6 @@ from services.api.app.models.order import (
 )
 from services.api.app.services.amazon_mock import AmazonMockAdapter
 from services.api.app.services.store import DraftRecord, store
-
 
 router = APIRouter()
 adapter = AmazonMockAdapter()
