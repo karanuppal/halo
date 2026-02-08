@@ -10,17 +10,18 @@ from services.api.app.models.order import (
     OrderDraftResponse,
     OrderReceipt,
 )
-from services.api.app.services.amazon_mock import AmazonMockAdapter
+from services.api.app.services.amazon_factory import get_amazon_adapter
 from services.api.app.services.store import DraftRecord, store
 
 router = APIRouter()
-adapter = AmazonMockAdapter()
 
 
 @router.post("/v1/order/draft", response_model=OrderDraftResponse)
 def create_order_draft(payload: OrderDraftRequest) -> OrderDraftResponse:
+    adapter = get_amazon_adapter()
+
     draft_id = uuid4().hex
-    draft = adapter.build_draft(payload.items)
+    draft = adapter.build_draft(payload.household_id, payload.items)
 
     response = OrderDraftResponse(
         draft_id=draft_id,
@@ -43,8 +44,19 @@ def confirm_order(payload: OrderConfirmRequest) -> OrderConfirmResponse:
     if record is None:
         raise HTTPException(status_code=404, detail="Draft not found")
 
+    adapter = get_amazon_adapter()
+    if record.response.vendor != adapter.vendor:
+        raise HTTPException(
+            status_code=409,
+            detail="Draft vendor does not match current adapter configuration",
+        )
+
     execution_id = uuid4().hex
-    result = adapter.execute(record.response.estimated_total_cents)
+    result = adapter.execute(
+        household_id=record.request.household_id,
+        items=record.response.items,
+        expected_total_cents=record.response.estimated_total_cents,
+    )
 
     return OrderConfirmResponse(
         execution_id=execution_id,

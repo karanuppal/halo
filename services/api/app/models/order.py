@@ -19,6 +19,7 @@ class OrderItemPriced(BaseModel):
     quantity: int
     unit_price_cents: int
     line_total_cents: int
+    product_url: str | None = None
 
 
 class OrderDraftResponse(BaseModel):
