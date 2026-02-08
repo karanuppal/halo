@@ -1,25 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from uuid import uuid4
 
 from services.api.app.models.order import OrderItemInput, OrderItemPriced
-
-
-@dataclass
-class DraftResult:
-    items: list[OrderItemPriced]
-    estimated_total_cents: int
-    delivery_window: str
-    payment_method_masked: str
-    warnings: list[str]
-
-
-@dataclass
-class ExecuteResult:
-    receipt_id: str
-    total_cents: int
-    summary: str
+from services.api.app.services.amazon_base import DraftResult, ExecuteResult
 
 
 class AmazonMockAdapter:
@@ -32,7 +16,9 @@ class AmazonMockAdapter:
             "pet food": 2499,
         }
 
-    def build_draft(self, items: list[OrderItemInput]) -> DraftResult:
+    def build_draft(self, household_id: str, items: list[OrderItemInput]) -> DraftResult:
+        del household_id
+
         priced_items: list[OrderItemPriced] = []
         total = 0
         for item in items:
@@ -45,6 +31,7 @@ class AmazonMockAdapter:
                     quantity=item.quantity,
                     unit_price_cents=unit_price,
                     line_total_cents=line_total,
+                    product_url=None,
                 )
             )
 
@@ -52,13 +39,23 @@ class AmazonMockAdapter:
             items=priced_items,
             estimated_total_cents=total,
             delivery_window="3-5 days",
-            payment_method_masked="Visa •••• 4242",
+            payment_method_masked="Visa **** 4242",
             warnings=[],
         )
 
-    def execute(self, total_cents: int) -> ExecuteResult:
+    def execute(
+        self,
+        household_id: str,
+        items: list[OrderItemPriced],
+        expected_total_cents: int,
+    ) -> ExecuteResult:
+        del household_id
+
+        computed_total = sum(item.line_total_cents for item in items)
+        total = computed_total or expected_total_cents
+
         return ExecuteResult(
             receipt_id=f"amz_{uuid4().hex[:10]}",
-            total_cents=total_cents,
+            total_cents=total,
             summary="Order placed",
         )
