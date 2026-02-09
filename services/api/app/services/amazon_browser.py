@@ -282,11 +282,18 @@ class AmazonBrowserAdapter:
     def _empty_cart(self, page: Any) -> None:
         page.goto(f"{self._cfg.base_url}/gp/cart/view.html", wait_until="domcontentloaded")
 
+        # If the cart is already empty, do not touch "Saved for later" items.
+        body_text = (page.inner_text("body") or "").lower()
+        if "your amazon cart is empty" in body_text or "your shopping cart is empty" in body_text:
+            return
+
+        # Only delete *cart* items (not "saved for later").
+        delete_selector = 'input[value="Delete"][name^="submit.delete."]'
+
         for _ in range(25):
-            btn = page.query_selector('input[value="Delete"]')
-            if btn is None:
+            if page.query_selector(delete_selector) is None:
                 break
-            btn.click()
+            page.click(delete_selector)
             page.wait_for_timeout(750)
 
     def _add_to_cart(self, page: Any, product_url: str, quantity: int) -> None:
