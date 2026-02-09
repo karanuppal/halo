@@ -25,6 +25,9 @@ class ClarificationQuestionV1(BaseModel):
     This is not chat. It is a short question with optional choices.
     """
 
+    # Stable id for mapping answers (e.g., 'q0'). Optional for backwards compatibility.
+    id: str = ""
+
     prompt: str
     choices: list[str] = Field(default_factory=list, max_length=8)
 
