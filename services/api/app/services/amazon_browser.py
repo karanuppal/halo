@@ -9,7 +9,15 @@ from typing import Any
 from urllib.parse import quote_plus, urljoin
 
 from services.api.app.models.order import OrderItemInput, OrderItemPriced
-from services.api.app.services.amazon_base import DraftResult, ExecuteResult
+from services.api.app.services.amazon_base import (
+    AmazonAdapterError,
+    AmazonBotCheckError,
+    AmazonCheckoutTotalDriftError,
+    AmazonLinkRequiredError,
+    AmazonPlaywrightMissingError,
+    DraftResult,
+    ExecuteResult,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,8 +64,10 @@ class AmazonBrowserAdapter:
         base_url = os.getenv("HALO_AMAZON_BASE_URL", "https://www.amazon.com").rstrip("/")
         storage_state_dir = Path(
             os.getenv("HALO_AMAZON_STORAGE_STATE_DIR", ".local/amazon_sessions")
-        )
-        artifacts_dir = Path(os.getenv("HALO_AMAZON_ARTIFACTS_DIR", ".local/amazon_artifacts"))
+        ).expanduser()
+        artifacts_dir = Path(
+            os.getenv("HALO_AMAZON_ARTIFACTS_DIR", ".local/amazon_artifacts")
+        ).expanduser()
 
         headless = _parse_bool(os.getenv("HALO_AMAZON_HEADLESS", "true"))
         dry_run = _parse_bool(os.getenv("HALO_AMAZON_DRY_RUN", "true"))
@@ -78,6 +88,8 @@ class AmazonBrowserAdapter:
 
     def build_draft(self, household_id: str, items: list[OrderItemInput]) -> DraftResult:
         state_path = self._storage_state_path(household_id)
+        run_dir = self._new_run_dir(household_id)
+
         warnings: list[str] = []
         priced: list[OrderItemPriced] = []
 
@@ -106,6 +118,13 @@ class AmazonBrowserAdapter:
                             product_url=product_url,
                         )
                     )
+            except Exception as e:
+                artifact = _write_debug_artifacts(page, run_dir, prefix="draft_error")
+                if _is_bot_check(page):
+                    raise AmazonBotCheckError(artifact) from e
+                raise AmazonAdapterError(
+                    f"Amazon browser draft failed: {type(e).__name__}: {e}. Artifact: {artifact}"
+                ) from e
             finally:
                 browser.close()
 
@@ -148,9 +167,9 @@ class AmazonBrowserAdapter:
                 if actual_total_cents is not None and expected_total_cents > 0:
                     drift = _drift_ratio(actual_total_cents, expected_total_cents)
                     if drift > self._cfg.max_total_drift_ratio:
-                        raise RuntimeError(
-                            "Checkout total drifted too far from draft estimate. "
-                            f"draft={expected_total_cents} actual={actual_total_cents}"
+                        raise AmazonCheckoutTotalDriftError(
+                            expected_total_cents=expected_total_cents,
+                            actual_total_cents=actual_total_cents,
                         )
 
                 if self._cfg.dry_run:
@@ -158,9 +177,7 @@ class AmazonBrowserAdapter:
                     return ExecuteResult(
                         receipt_id=f"dryrun_{int(time.time())}",
                         total_cents=actual_total_cents or expected_total_cents,
-                        summary=(
-                            f"Dry run: stopped at checkout. Screenshot: {run_dir}/checkout.png"
-                        ),
+                        summary=f"Dry run: stopped at checkout. Screenshot: {run_dir}/checkout.png",
                     )
 
                 self._place_order(page)
@@ -172,28 +189,25 @@ class AmazonBrowserAdapter:
                     total_cents=actual_total_cents or expected_total_cents,
                     summary="Order placed",
                 )
-            except Exception:
-                try:
-                    page.screenshot(path=str(run_dir / "error.png"), full_page=True)
-                except Exception:
-                    pass
-                raise
+            except Exception as e:
+                artifact = _write_debug_artifacts(page, run_dir, prefix="execute_error")
+                if _is_bot_check(page):
+                    raise AmazonBotCheckError(artifact) from e
+                raise AmazonAdapterError(
+                    f"Amazon browser execute failed: {type(e).__name__}: {e}. Artifact: {artifact}"
+                ) from e
             finally:
                 browser.close()
 
     def _storage_state_path(self, household_id: str) -> Path:
-        state_path = self._cfg.storage_state_dir / f"{household_id}.json"
+        state_path = (self._cfg.storage_state_dir / f"{household_id}.json").expanduser()
         if not state_path.exists():
-            raise RuntimeError(
-                "Amazon session not linked for this household. "
-                "Run scripts/amazon_link.py to link and create a storage_state file: "
-                f"{state_path}"
-            )
+            raise AmazonLinkRequiredError(state_path)
         return state_path
 
     def _new_run_dir(self, household_id: str) -> Path:
         ts = time.strftime("%Y%m%d_%H%M%S")
-        run_dir = self._cfg.artifacts_dir / household_id / ts
+        run_dir = (self._cfg.artifacts_dir / household_id / ts).expanduser()
         run_dir.mkdir(parents=True, exist_ok=True)
         return run_dir
 
@@ -326,13 +340,46 @@ def _sync_playwright() -> Any:
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as e:  # pragma: no cover
-        raise RuntimeError(
-            "playwright is not installed. Install the optional group and browsers:\n"
-            "  uv sync --group amazon\n"
-            "  uv run playwright install chromium\n"
-        ) from e
+        raise AmazonPlaywrightMissingError() from e
 
     return sync_playwright()
+
+
+def _write_debug_artifacts(page: Any, run_dir: Path, prefix: str) -> Path:
+    screenshot_path = run_dir / f"{prefix}.png"
+    html_path = run_dir / f"{prefix}.html"
+
+    try:
+        page.screenshot(path=str(screenshot_path), full_page=True)
+    except Exception:
+        pass
+
+    try:
+        html_path.write_text(page.content(), encoding="utf-8")
+    except Exception:
+        pass
+
+    return screenshot_path
+
+
+def _is_bot_check(page: Any) -> bool:
+    try:
+        if page.query_selector("input#captchacharacters") is not None:
+            return True
+        if page.query_selector("form[action*='validateCaptcha']") is not None:
+            return True
+
+        url = getattr(page, "url", "") or ""
+        if "/ap/signin" in url and page.query_selector("input#ap_email") is not None:
+            return True
+
+        title = (page.title() or "").lower()
+        if "robot check" in title or "captcha" in title:
+            return True
+    except Exception:
+        return False
+
+    return False
 
 
 _ASIN_RE = re.compile(r"^[A-Z0-9]{10}$", re.IGNORECASE)
