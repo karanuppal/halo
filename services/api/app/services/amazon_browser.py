@@ -221,21 +221,41 @@ class AmazonBrowserAdapter:
         if raw.startswith("http://") or raw.startswith("https://"):
             return raw
 
-        selector = 'div[data-component-type="s-search-result"] h2 a'
         search_url = f"{self._cfg.base_url}/s?k={quote_plus(raw)}"
 
         page.goto(search_url, wait_until="domcontentloaded")
-        page.wait_for_selector(selector, timeout=20_000)
+        # Amazon's markup changes frequently. Prefer grabbing the first result element, then
+        # extracting a product link or falling back to the result ASIN.
+        page.wait_for_selector(
+            'div[data-component-type="s-search-result"][data-asin]',
+            timeout=20_000,
+        )
 
-        link = page.query_selector(selector)
-        if link is None:
-            raise RuntimeError(f"No search results found for: {raw!r}")
+        results = page.query_selector_all('div[data-component-type="s-search-result"][data-asin]')
+        for result in results:
+            asin_attr = (result.get_attribute("data-asin") or "").strip()
+            if not asin_attr:
+                continue
 
-        href = link.get_attribute("href")
-        if not href:
-            raise RuntimeError(f"Could not extract product link for query: {raw!r}")
+            link_selectors = (
+                "a.a-link-normal.s-no-outline[href]",
+                'a.a-link-normal[href*="/dp/"][href]',
+                'a[href*="/dp/"]',
+            )
+            for sel in link_selectors:
+                link = result.query_selector(sel)
+                if link is None:
+                    continue
+                href = link.get_attribute("href")
+                if not href or "/dp/" not in href:
+                    continue
+                return urljoin(self._cfg.base_url, href)
 
-        return urljoin(self._cfg.base_url, href)
+            asin = _maybe_asin(asin_attr)
+            if asin is not None:
+                return f"{self._cfg.base_url}/dp/{asin}"
+
+        raise RuntimeError(f"No search results found for: {raw!r}")
 
     def _get_unit_price_cents(self, page: Any, product_url: str) -> int:
         page.goto(product_url, wait_until="domcontentloaded")
