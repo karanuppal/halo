@@ -49,17 +49,26 @@ def main() -> int:
         ) from e
 
     base_url = args.base_url.rstrip("/")
-    sign_in_url = f"{base_url}/ap/signin"
 
-    print("This will open a browser to log into Amazon.")
-    print("After you're fully logged in, press Enter here to save session to:")
+    print("This will open a browser.")
+    print("1. Sign into Amazon in the browser (Account & Lists -> Sign in).")
+    print("2. Make sure you see you're signed in.")
+    print("3. Press Enter here to save session cookies to:")
     print(storage_state_path)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=args.headless, slow_mo=args.slow_mo_ms)
         context = browser.new_context()
         page = context.new_page()
-        page.goto(sign_in_url, wait_until="domcontentloaded")
+
+        # Amazon frequently changes direct signin URLs. Starting at the homepage is more stable.
+        page.goto(base_url, wait_until="domcontentloaded")
+
+        # Best-effort: open the signin flow.
+        try:
+            page.click("#nav-link-accountList", timeout=5_000)
+        except Exception:
+            pass
 
         input()
 
