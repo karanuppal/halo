@@ -120,3 +120,41 @@ class EventLog(Base):
     event_payload_json: Mapped[dict] = mapped_column(JSON, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class UsualItem(Base):
+    __tablename__ = "usual_items"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    household_id: Mapped[str] = mapped_column(ForeignKey("households.id"), nullable=False)
+
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    household_id: Mapped[str] = mapped_column(ForeignKey("households.id"), nullable=False)
+
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    monthly_cost_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    renewal_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class BookingVendor(Base):
+    __tablename__ = "booking_vendors"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    household_id: Mapped[str] = mapped_column(ForeignKey("households.id"), nullable=False)
+
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    default_service_type: Mapped[str] = mapped_column(String, nullable=False)
+    price_estimate_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
