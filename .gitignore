@@ -5,3 +5,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.pyc
+
+# iOS (generated)
+apps/ios/*.xcodeproj/
+apps/ios/*.xcworkspace/
