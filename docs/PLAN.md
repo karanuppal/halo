@@ -1,141 +1,204 @@
-# Halo MVP Plan (Phase 0 Inventory and Roadmap)
+# Halo MVP Plan (End-to-End)
 
-Last updated: 2026-02-09
+Last updated: 2026-02-10
 
-This document is the working plan owned by the Team Lead. It is intentionally concrete and ordered.
+This is the concrete, ordered build plan for finishing the Halo MVP end-to-end. It is designed to ship vertical slices, preserve the canonical Amazon + Playwright REORDER execution path, and keep CI green.
 
-## Phase 0: Inventory (Current Repo State)
+## Current State Snapshot
 
-### What exists and works today
+Backend (FastAPI) exists and is tested:
+- Natural language -> Draft card -> Modify -> Confirm -> Execution -> Receipts -> Audit APIs.
+- LLM intent extraction is implemented with provider switch:
+  - Deterministic fake provider (default, used in tests).
+  - OpenAI provider (`HALO_LLM_PROVIDER=openai`, `OPENAI_API_KEY=...`) for real intent understanding.
+- Canonical REORDER integration exists:
+  - Amazon browser automation via Playwright (`HALO_AMAZON_ADAPTER=browser`).
+  - Spend boundary enforced via `HALO_AMAZON_DRY_RUN=true|false`.
+  - Debug artifacts written on failures.
 
-Backend (FastAPI):
-- `GET /health`
-- `POST /v1/order/draft`
-- `POST /v1/order/confirm`
+iOS exists as source scaffolding:
+- `apps/ios/project.yml` exists (XcodeGen).
+- SwiftUI app + Messages extension sources exist, but are not yet build-verified.
 
-Amazon integrations:
-- `AMAZON_MOCK`: deterministic mock draft and confirm for tests.
-- `AMAZON_BROWSER` (Playwright): real Amazon browser automation.
-  - `scripts/amazon_link.py` links a household session via Playwright `storage_state`.
-  - Draft searches Amazon and reads best-effort prices.
-  - Confirm clears cart, adds items, proceeds to checkout.
-  - Spend boundary controlled by `HALO_AMAZON_DRY_RUN`.
-  - Writes debug artifacts (screenshot + HTML) on failures.
+Infra (Terraform) exists as scaffolding:
+- Cloud Run + Cloud SQL + secrets modules exist.
+- Deployment is deferred until local dogfooding is stable.
 
-Tests and tooling:
-- `uv` dependency management (`pyproject.toml`, `uv.lock`).
-- CI runs `ruff check`, `ruff format --check`, `pytest`.
+## MVP Definition of Done
 
-Infra scaffolding:
-- `infra/terraform/**` exists but is placeholder content.
+The MVP is done when:
+- A user can type a vague or verbose instruction in iMessage.
+- Halo (via OpenAI LLM) extracts intent, asks at most 1-2 clarifying questions if required, then produces a Draft.
+- Confirm is the only spend/irreversible boundary.
+- REORDER executes via the existing Amazon Playwright path (manual dogfood mode; never in CI).
+- BOOK executes against a real booking system (Resy or equivalent) in dogfood mode, with a deterministic mock in CI.
+- CANCEL remains deterministic mock (acceptable for MVP).
+- Every action is visible in the Audit Dashboard with receipts and a full execution record.
 
-iOS scaffolding:
-- `apps/ios/HaloApp/.gitkeep`, `apps/ios/HaloMessagesExtension/.gitkeep` only.
+## Milestones (Ordered)
 
-### Major gaps vs MVP
-
-Product requirements not implemented yet:
-- LLM-based intent extraction for natural language commands.
-- Unified draft/modify/confirm flow for the three MVP verbs.
-- Bounded clarifications (1 to 2 questions max).
-- Persistent Postgres-backed data model (households, users, drafts, confirmations, executions, receipts, append-only event log).
-- Audit APIs for activity feed and execution detail.
-- CANCEL_SUBSCRIPTION adapter (mock provider registry).
-- BOOK_APPOINTMENT adapter (mock vendor, 3 time windows).
-- Retry engine with safe classification.
-- iMessage extension UI and Audit Dashboard iOS app.
-- Terraform for Cloud Run + Cloud SQL + secrets.
-
-## Phase 1: Backend Vertical Slice (Dogfoodable Without iOS)
-
-Goal: From a single endpoint, accept natural language, return a structured Draft, allow Confirm, execute Amazon REORDER via Playwright, persist an audit record with receipt artifacts.
+### M0: Plan + Runbook Baseline
 
 Deliverables:
-- New endpoints (names may evolve, but functionality is required):
-  - `POST /v1/command/parse` (LLM intent extraction)
-  - `POST /v1/draft/create`
-  - `POST /v1/draft/modify`
-  - `POST /v1/draft/confirm`
-  - `GET /v1/executions?household_id=...`
-  - `GET /v1/executions/{id}`
-  - `GET /v1/receipts/{execution_id}`
-- Postgres schema + migrations:
-  - Household, User, Preference
-  - ExecutionRequest, Draft, Confirmation
-  - Execution, ExecutionAttempt, ReceiptArtifact
-  - EventLog (append-only)
-- LLM provider abstraction with a deterministic fake for tests.
-- REORDER draft creation using a stored "Usual" bundle and/or last successful REORDER.
-- Execution uses existing Amazon Playwright flow (canonical integration).
-
-Notes:
-- Keep automated tests from placing real Amazon orders.
-- Provide a CLI helper to exercise parse/draft/confirm locally via curl.
-
-## Phase 2: Add Remaining MVP Verbs (Mocked)
-
-Deliverables:
-- CANCEL_SUBSCRIPTION:
-  - Subscription registry table seeded with a few examples.
-  - Draft includes irreversibility warning.
-  - Confirm generates a cancellation confirmation artifact.
-- BOOK_APPOINTMENT:
-  - One predefined vendor.
-  - Draft includes 3 time windows.
-  - Modify selects one window.
-  - Confirm generates booking confirmation.
-
-## Phase 3: iOS iMessage Extension + Audit Dashboard
-
-Goal: Replace curl with the real user experience.
-
-Deliverables:
-- iMessage extension:
-  - Command input, quick actions.
-  - Render Draft card with Confirm/Modify/Cancel.
-  - Modify UI per verb.
-  - Execution status updates (Executing/Done/Failed).
-- Audit Dashboard app:
-  - Activity feed (Done/In progress/Failed).
-  - Execution detail view: original command, parsed intent, draft vs final, confirmation latency, receipts, errors.
+- Update this plan to reflect the true remaining work.
+- Add `docs/RUNBOOK.md` (kept up-to-date as we implement).
 
 Testing:
-- XCUITest for primary flows using a stubbed backend.
+- `uv run ruff check .`
+- `uv run ruff format --check .`
+- `uv run pytest`
 
-## Phase 4: Infrastructure (Ready to Deploy)
+### M1: iOS Project Generation + Build (Unblock iOS Work)
+
+Goal:
+- Make `apps/ios/` buildable via XcodeGen + `xcodebuild`.
 
 Deliverables:
-- Terraform modules filled out for:
-  - Cloud Run (api + worker)
+- `xcodegen generate` produces an Xcode project.
+- `xcodebuild ... build` succeeds for the iOS app and embeds the Messages extension.
+- Add minimal helper commands (repo root `Makefile` or `scripts/ios_*.sh`) for:
+  - generate
+  - build
+  - test
+
+Testing:
+- `cd apps/ios && xcodegen generate`
+- `xcodebuild ... build` (iOS Simulator)
+
+### M2: Audit Dashboard App (Trust UI) + XCUITest Smoke
+
+Goal:
+- The iOS app shows the Activity feed and Execution detail, backed by the audit APIs.
+
+Deliverables:
+- Setup view persists base URL + household id + user id.
+- Activity feed displays newest-first executions.
+- Execution detail shows:
+  - raw command
+  - normalized intent JSON
+  - draft payload vs execution payload
+  - confirmation latency
+  - receipt artifact(s)
+- Add XCUITest smoke:
+  - App launches.
+  - Activity screen renders (stubbed backend by default).
+
+Testing:
+- `xcodebuild ... test` (simulator)
+- Backend tests remain covered by `pytest`.
+
+### M3: iMessage Extension MVP UX (Delegate -> Approve -> Done)
+
+Goal:
+- Messages extension can submit a command, render Draft/Clarify/Unsupported, support Modify per verb, Confirm, and render Done/Failed.
+
+Deliverables:
+- Draft rendering:
+  - title/summary/vendor/estimated cost
+  - Confirm / Modify / Cancel
+- Modify UI:
+  - REORDER: +/- quantities for 3-10 items
+  - CANCEL: subscription dropdown
+  - BOOK: pick from 3 time windows
+- Message payload strategy:
+  - insert an `MSMessage` with a deep link containing `draft_id`/`execution_id` so the app can rehydrate state.
+
+Testing:
+- Manual testing in iMessage simulator/device.
+- Unit tests for message payload encode/decode where feasible.
+
+### M4: Real Booking Integration (Resy) Behind an Adapter
+
+Goal:
+- BOOK_APPOINTMENT uses a real integration for dogfooding, while CI uses a deterministic mock.
+
+Deliverables:
+- Booking adapter interface + factory:
+  - `HALO_BOOKING_ADAPTER=mock|resy`
+- Resy integration (dogfood mode):
+  - Draft:
+    - query availability and return 3 time options
+    - include vendor info and best-effort price estimate
+  - Confirm:
+    - book selected slot
+    - store confirmation as a receipt artifact
+  - Auth/link flow:
+    - `scripts/resy_link.py --household-id hh-1`
+    - persist session/token safely under `.local/` (never commit)
+  - Preferences:
+    - store default Resy venue/provider identifiers per household
+- Safety guardrails:
+  - fail closed if booking requires payment/deposit we cannot safely handle
+  - cap retries, avoid double-booking
+
+Testing:
+- CI and automated tests must not hit Resy.
+- Unit tests cover adapter contract + mock adapter.
+- Manual dogfood flow documented in `docs/RUNBOOK.md`.
+
+### M5: Intelligent Retries + Attempt Logging
+
+Goal:
+- Reduce flaky automation failures without risking double charges/reservations.
+
+Deliverables:
+- Add attempt logging (event log + optional DB table) and cap retries.
+- Retry only clearly safe, pre-commit steps.
+- If state is uncertain, stop and require a new Draft + Confirm.
+
+Testing:
+- Unit tests for retry classification/caps.
+- Manual Amazon/Resy regressions include at least one induced transient failure.
+
+### M6: Deployment Readiness (GCP Last)
+
+Goal:
+- Fully deployable to Cloud Run + Cloud SQL via Terraform, after local dogfooding is stable.
+
+Deliverables:
+- Postgres migrations (Alembic) for Cloud SQL.
+- Terraform envs produce:
   - Cloud SQL Postgres
-  - Secret Manager
-  - Networking/IAM
-- Local dev guide for env vars and secret injection.
+  - Cloud Run service(s)
+  - Secret Manager entries (OpenAI key, Resy token/session)
+- Minimal deploy steps in runbook.
 
-## Work Allocation (Agents)
+Testing:
+- Terraform `fmt` + `validate` locally.
+- Optional staged deployment later.
 
-Team Lead:
-- Own Phase 0 artifacts (`AGENTS.md`, this plan).
-- Drive sequencing and PR integration.
+## Test Scope (What We Run When)
 
-Backend Agent (highest priority first):
-1. Data model + Postgres + migrations + EventLog.
-2. LLM intent extraction interface + fake provider + tests.
-3. Unified Draft/Confirm API with REORDER wired to Amazon Playwright.
-4. CANCEL_SUBSCRIPTION + BOOK_APPOINTMENT mock adapters.
-5. Retry classification + ExecutionAttempt logging.
+Backend (every PR):
+- `uv run ruff check .`
+- `uv run ruff format --check .`
+- `uv run pytest`
 
-iOS Agent:
-1. Define message payload schemas shared between extension and app.
-2. iMessage extension UI (Draft, Modify, Confirm, Status).
-3. Audit Dashboard app (feed + detail) using backend APIs.
+Backend (manual dogfood):
+- Amazon real automation:
+  - link session
+  - draft
+  - confirm dry-run
+  - confirm real spend (explicit)
+- Resy real booking:
+  - link/auth
+  - draft returns 3 real time slots
+  - modify selects a slot
+  - confirm books and returns confirmation artifact
 
-Infra Agent:
-1. Terraform modules for Cloud Run + Cloud SQL + Secret Manager.
-2. Cloud Run service configs for worker queues/retries (later).
+iOS (every iOS milestone PR):
+- `cd apps/ios && xcodegen generate`
+- `xcodebuild ... build`
+- `xcodebuild ... test` (app smoke; extension manual)
 
-QA Agent:
-1. Acceptance checklist mapped to MVP requirements.
-2. Integration test harness for backend flows.
-3. Manual Amazon regression checklist (linking, draft, confirm, receipt).
+## Final MVP Test (End-to-End)
 
+Acceptance checklist (must pass):
+- REORDER: vague input -> Draft -> Confirm -> Done with receipt -> visible in dashboard.
+- CANCEL: “cancel Netflix” -> Draft with warning -> Confirm -> Done with cancellation confirmation -> visible in dashboard.
+- BOOK: “book dinner Friday around 7 for 2” -> Draft with 3 options -> Modify option 2 -> Confirm -> Done with Resy confirmation -> visible in dashboard.
+- Unsupported: “fix kitchen sink” -> Unsupported card.
+
+## Runbook
+
+The end-to-end runbook lives in `docs/RUNBOOK.md` and is updated as milestones land.
