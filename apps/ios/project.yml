@@ -1,0 +1,36 @@
+name: Halo
+options:
+  bundleIdPrefix: com.karanuppal
+  deploymentTarget:
+    iOS: "17.0"
+
+settings:
+  base:
+    PRODUCT_NAME: Halo
+
+targets:
+  HaloApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: HaloApp/Sources
+      - path: Shared
+    resources:
+      - path: HaloApp/Resources
+    info:
+      path: HaloApp/Resources/Info.plist
+    dependencies:
+      - target: HaloMessagesExtension
+        embed: true
+
+  HaloMessagesExtension:
+    type: app-extension
+    platform: iOS
+    productType: com.apple.product-type.app-extension.messages
+    sources:
+      - path: HaloMessagesExtension/Sources
+      - path: Shared
+    resources:
+      - path: HaloMessagesExtension/Resources
+    info:
+      path: HaloMessagesExtension/Resources/Info.plist
