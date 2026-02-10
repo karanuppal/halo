@@ -202,8 +202,26 @@ xcodegen generate
 
 Build (simulator):
 
+1) Ensure an iOS Simulator runtime matching Xcode’s iOS SDK is installed:
+
 ```bash
-xcodebuild -project Halo.xcodeproj -scheme HaloApp -destination 'generic/platform=iOS Simulator' build
+xcodebuild -showsdks | grep -i "Simulator - iOS"
+xcrun simctl list runtimes
+```
+
+If you do not see an iOS runtime that matches the `iphonesimulatorXX.Y` SDK that Xcode reports, install it in:
+- Xcode -> Settings -> Components (download the iOS Simulator runtime)
+
+2) Pick a simulator device name:
+
+```bash
+xcrun simctl list devices
+```
+
+3) Build:
+
+```bash
+xcodebuild -project Halo.xcodeproj -scheme HaloApp   -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build
 ```
 
 Run:
