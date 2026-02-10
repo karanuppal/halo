@@ -34,6 +34,12 @@ from services.api.app.services.amazon_base import (
     AmazonPlaywrightMissingError,
 )
 from services.api.app.services.amazon_factory import get_amazon_adapter
+from services.api.app.services.booking_base import (
+    BookingAdapterError,
+    BookingLinkRequiredError,
+    BookingPlaywrightMissingError,
+)
+from services.api.app.services.booking_factory import get_booking_adapter
 from sqlalchemy.orm import Session
 
 router = APIRouter()
@@ -361,19 +367,33 @@ def _draft_book_appointment(
     )
     service_type = service_type.strip() or vendor.default_service_type
 
-    windows = _default_time_windows()
-    selected = 0
+    try:
+        adapter = get_booking_adapter()
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    try:
+        draft = adapter.build_draft(
+            payload.household_id,
+            vendor_name=vendor.name,
+            service_type=service_type,
+            price_estimate_cents=vendor.price_estimate_cents,
+            params=dict(intent.params or {}),
+        )
+    except Exception as e:
+        _raise_booking_http_error(e)
 
     draft_id = uuid4().hex
     draft_payload = {
         "verb": "BOOK_APPOINTMENT",
-        "vendor": "MOCK_BOOKING",
+        "vendor": adapter.vendor,
         "intent": intent.model_dump(mode="json"),
-        "service_type": service_type,
-        "vendor_name": vendor.name,
-        "price_estimate_cents": vendor.price_estimate_cents,
-        "time_windows": windows,
-        "selected_time_window_index": selected,
+        "service_type": draft.service_type,
+        "vendor_name": draft.vendor_name,
+        "price_estimate_cents": draft.price_estimate_cents,
+        "time_windows": draft.time_windows,
+        "selected_time_window_index": draft.selected_time_window_index,
+        "warnings": draft.warnings,
     }
 
     db.add(
@@ -381,8 +401,8 @@ def _draft_book_appointment(
             id=draft_id,
             execution_request_id=execution_request_id,
             verb="BOOK_APPOINTMENT",
-            vendor="MOCK_BOOKING",
-            estimated_cost_cents=vendor.price_estimate_cents,
+            vendor=adapter.vendor,
+            estimated_cost_cents=draft.price_estimate_cents,
             draft_payload_json=draft_payload,
         )
     )
@@ -402,25 +422,25 @@ def _draft_book_appointment(
     return CardV1(
         type=CardTypeV1.DRAFT,
         title="Draft: BOOK APPOINTMENT",
-        summary=f"I will book {service_type} with {vendor.name}.",
+        summary=f"I will book {draft.service_type} with {draft.vendor_name}.",
         household_id=payload.household_id,
         user_id=payload.user_id,
         draft_id=draft_id,
-        vendor="MOCK_BOOKING",
-        estimated_cost_cents=vendor.price_estimate_cents,
+        vendor=adapter.vendor,
+        estimated_cost_cents=draft.price_estimate_cents,
         body={
-            "service_type": service_type,
-            "vendor_name": vendor.name,
-            "price_estimate_cents": vendor.price_estimate_cents,
-            "time_windows": windows,
-            "selected_time_window_index": selected,
+            "service_type": draft.service_type,
+            "vendor_name": draft.vendor_name,
+            "price_estimate_cents": draft.price_estimate_cents,
+            "time_windows": draft.time_windows,
+            "selected_time_window_index": draft.selected_time_window_index,
         },
         actions=[
             CardActionV1(type=CardActionTypeV1.CONFIRM, label="Confirm", payload={}),
             CardActionV1(type=CardActionTypeV1.MODIFY, label="Modify", payload={}),
             CardActionV1(type=CardActionTypeV1.CANCEL, label="Cancel", payload={}),
         ],
-        warnings=[],
+        warnings=draft.warnings,
     )
 
 
@@ -580,6 +600,22 @@ def _default_time_windows() -> list[dict[str, str]]:
             "end": (base.replace(hour=17)).isoformat() + "Z",
         },
     ]
+
+
+def _raise_booking_http_error(e: Exception) -> None:
+    if isinstance(e, BookingLinkRequiredError):
+        raise HTTPException(status_code=412, detail=str(e)) from e
+
+    if isinstance(e, BookingPlaywrightMissingError):
+        raise HTTPException(status_code=503, detail=str(e)) from e
+
+    if isinstance(e, NotImplementedError):
+        raise HTTPException(status_code=501, detail=str(e)) from e
+
+    if isinstance(e, BookingAdapterError):
+        raise HTTPException(status_code=502, detail=str(e)) from e
+
+    raise HTTPException(status_code=500, detail="Internal Server Error") from e
 
 
 def _raise_adapter_http_error(e: Exception) -> None:

@@ -29,6 +29,12 @@ from services.api.app.services.amazon_base import (
     AmazonPlaywrightMissingError,
 )
 from services.api.app.services.amazon_factory import get_amazon_adapter
+from services.api.app.services.booking_base import (
+    BookingAdapterError,
+    BookingLinkRequiredError,
+    BookingPlaywrightMissingError,
+)
+from services.api.app.services.booking_factory import get_booking_adapter
 from sqlalchemy.orm import Session
 
 router = APIRouter()
@@ -438,24 +444,31 @@ def _execute_book_appointment(db: Session, draft: Draft, execution: Execution) -
 
     payload = draft.draft_payload_json or {}
 
-    confirmation_id = f"book_{uuid4().hex[:10]}"
-    service = payload.get("service_type")
-    vendor = payload.get("vendor_name")
+    try:
+        adapter = get_booking_adapter()
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    if draft.vendor != adapter.vendor:
+        raise HTTPException(status_code=409, detail="Draft vendor mismatch")
+
+    try:
+        result = adapter.execute(household_id, draft_payload=payload)
+    except Exception as e:
+        _raise_booking_http_error(e)
 
     idx = int(payload.get("selected_time_window_index") or 0)
     windows = payload.get("time_windows") or []
     selected = windows[idx] if isinstance(windows, list) and len(windows) > idx else {}
 
-    content = f"Booked {service} with {vendor}. Confirmation: {confirmation_id}. Window: {selected}"
-
     execution.status = "DONE"
     execution.finished_at = datetime.utcnow()
     execution.final_cost_cents = int(payload.get("price_estimate_cents") or 0)
     execution.execution_payload_json = {
-        "confirmation_id": confirmation_id,
+        "confirmation_id": result.confirmation_id,
         "details": {
-            "service_type": service,
-            "vendor_name": vendor,
+            "service_type": payload.get("service_type"),
+            "vendor_name": payload.get("vendor_name"),
             "time_window": selected,
         },
     }
@@ -466,8 +479,8 @@ def _execute_book_appointment(db: Session, draft: Draft, execution: Execution) -
             id=receipt_row_id,
             execution_id=execution.id,
             type="BOOKING_CONFIRMATION",
-            content_text=content,
-            external_reference_id=confirmation_id,
+            content_text=result.summary,
+            external_reference_id=result.external_reference_id or result.confirmation_id,
         )
     )
 
@@ -487,7 +500,10 @@ def _execute_book_appointment(db: Session, draft: Draft, execution: Execution) -
         entity_type="ReceiptArtifact",
         entity_id=receipt_row_id,
         event_type="RECEIPT_CREATED",
-        event_payload={"type": "BOOKING_CONFIRMATION", "external_reference_id": confirmation_id},
+        event_payload={
+            "type": "BOOKING_CONFIRMATION",
+            "external_reference_id": result.external_reference_id or result.confirmation_id,
+        },
     )
 
     db.commit()
@@ -495,14 +511,17 @@ def _execute_book_appointment(db: Session, draft: Draft, execution: Execution) -
     return CardV1(
         type=CardTypeV1.DONE,
         title="Done: BOOK APPOINTMENT",
-        summary=content,
+        summary=result.summary,
         household_id=household_id,
         user_id=request_user_id,
         draft_id=draft.id,
         execution_id=execution.id,
         vendor=draft.vendor,
         estimated_cost_cents=int(payload.get("price_estimate_cents") or 0),
-        body={"confirmation_id": confirmation_id, "details": execution.execution_payload_json},
+        body={
+            "confirmation_id": result.confirmation_id,
+            "details": execution.execution_payload_json,
+        },
         actions=[],
         warnings=[],
     )
@@ -613,6 +632,22 @@ def _log_event(
             event_payload_json=event_payload,
         )
     )
+
+
+def _raise_booking_http_error(e: Exception) -> None:
+    if isinstance(e, BookingLinkRequiredError):
+        raise HTTPException(status_code=412, detail=str(e)) from e
+
+    if isinstance(e, BookingPlaywrightMissingError):
+        raise HTTPException(status_code=503, detail=str(e)) from e
+
+    if isinstance(e, NotImplementedError):
+        raise HTTPException(status_code=501, detail=str(e)) from e
+
+    if isinstance(e, BookingAdapterError):
+        raise HTTPException(status_code=502, detail=str(e)) from e
+
+    raise HTTPException(status_code=500, detail="Internal Server Error") from e
 
 
 def _raise_adapter_http_error(e: Exception) -> None:

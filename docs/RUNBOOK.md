@@ -165,11 +165,17 @@ Confirm via `/v1/draft/confirm`.
 
 ### Resy booking (to be implemented in Milestone M4)
 
-Design intent:
-- `HALO_BOOKING_ADAPTER=resy`
-- `scripts/resy_link.py --household-id hh-1` to create a household session/token under `.local/`
-- Draft queries availability and returns 3 candidate time slots
-- Confirm books and stores a confirmation artifact
+Setup (dogfood mode):
+
+```bash
+export HALO_BOOKING_ADAPTER=resy
+export HALO_RESY_STORAGE_STATE_DIR="/Users/karanuppal/Downloads/workspaces/halo/.local/resy_sessions"
+uv run python scripts/resy_link.py --household-id hh-1
+```
+
+Status:
+- The Resy adapter scaffolding is present, but the availability and booking automation is still TODO.
+- Today, `HALO_BOOKING_ADAPTER=resy` will return a `501` until implemented.
 
 ## Audit Dashboard APIs (curl)
 
