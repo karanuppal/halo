@@ -77,3 +77,56 @@ def test_book_modify_selects_option_2_then_confirm(client: TestClient) -> None:
     assert data["type"] == "DONE"
     assert data["execution_id"]
     assert "confirmation_id" in data["body"]
+
+
+def test_confirm_logs_autopilot_signal_event(client: TestClient) -> None:
+    draft_card = client.post(
+        "/v1/command",
+        json={"household_id": "hh-1", "user_id": "u-1", "raw_command_text": "reorder usual"},
+    ).json()
+    draft_id = draft_card["draft_id"]
+
+    done = client.post("/v1/draft/confirm", json={"draft_id": draft_id, "user_id": "u-1"})
+    assert done.status_code == 200
+
+    from services.api.app.db.database import db_session
+    from services.api.app.db.models import EventLog
+
+    with db_session() as db:
+        events = (
+            db.query(EventLog)
+            .filter(EventLog.event_type == "AUTOPILOT_SIGNAL_COMPUTED")
+            .order_by(EventLog.created_at.asc())
+            .all()
+        )
+
+    assert len(events) == 1
+    payload = events[0].event_payload_json
+    assert payload["routine_key"].startswith("REORDER")
+    assert payload["repeats_count"] == 1
+    assert payload["adapter"]["vendor"] == "AMAZON_MOCK"
+
+
+def test_autopilot_signal_repeats_count_increments(client: TestClient) -> None:
+    for _ in range(2):
+        draft_card = client.post(
+            "/v1/command",
+            json={"household_id": "hh-1", "user_id": "u-1", "raw_command_text": "reorder usual"},
+        ).json()
+        draft_id = draft_card["draft_id"]
+        done = client.post("/v1/draft/confirm", json={"draft_id": draft_id, "user_id": "u-1"})
+        assert done.status_code == 200
+
+    from services.api.app.db.database import db_session
+    from services.api.app.db.models import EventLog
+
+    with db_session() as db:
+        events = (
+            db.query(EventLog)
+            .filter(EventLog.event_type == "AUTOPILOT_SIGNAL_COMPUTED")
+            .order_by(EventLog.created_at.asc())
+            .all()
+        )
+
+    assert len(events) >= 2
+    assert events[-1].event_payload_json["repeats_count"] >= 2

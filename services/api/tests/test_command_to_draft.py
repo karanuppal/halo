@@ -78,3 +78,24 @@ def test_command_book_cleaning_returns_draft_card(client: TestClient) -> None:
     assert data["vendor"] == "MOCK_BOOKING"
     assert data["body"]["service_type"]
     assert len(data["body"]["time_windows"]) == 3
+
+
+def test_command_out_of_scope_returns_unsupported_card(client: TestClient) -> None:
+    resp = client.post(
+        "/v1/command",
+        json={
+            "household_id": "hh-1",
+            "user_id": "u-1",
+            "raw_command_text": "fix kitchen sink",
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["type"] == "UNSUPPORTED"
+    assert data["title"].startswith("Not supported")
+    assert data["body"]["supported"] == [
+        "REORDER",
+        "CANCEL_SUBSCRIPTION",
+        "BOOK_APPOINTMENT",
+    ]

@@ -65,8 +65,22 @@ class FakeIntentExtractor:
                 clarifications=[],
             )
 
-        # Reorder (default)
+        # Reorder / order
         items = _extract_items(text)
+        reorder_trigger = any(
+            k in text
+            for k in (
+                "reorder",
+                "order",
+                "buy",
+                "purchase",
+                "restock",
+                "usual",
+                "running low",
+                "low on",
+                "like last time",
+            )
+        )
         if items:
             return IntentV1(
                 verb=VerbV1.REORDER,
@@ -77,12 +91,41 @@ class FakeIntentExtractor:
                 clarifications=[],
             )
 
+        if reorder_trigger:
+            implies_usual = any(
+                k in text for k in ("usual", "like last time", "running low", "low on")
+            )
+            if implies_usual:
+                return IntentV1(
+                    verb=VerbV1.REORDER,
+                    object="usual",
+                    params={"usual": True},
+                    confidence=0.85,
+                    routine_key="REORDER:USUAL",
+                    clarifications=[],
+                )
+
+            return IntentV1(
+                verb=VerbV1.REORDER,
+                object="",
+                params={},
+                confidence=0.45,
+                routine_key="REORDER",
+                clarifications=[
+                    ClarificationQuestionV1(
+                        id="q0",
+                        prompt="What should I order?",
+                        choices=["paper towels", "detergent", "pet food"],
+                    )
+                ],
+            )
+
         return IntentV1(
-            verb=VerbV1.REORDER,
-            object="usual",
-            params={"usual": True},
-            confidence=0.85,
-            routine_key="REORDER:USUAL",
+            verb=VerbV1.UNSUPPORTED,
+            object="",
+            params={},
+            confidence=0.2,
+            routine_key="UNSUPPORTED",
             clarifications=[],
         )
 

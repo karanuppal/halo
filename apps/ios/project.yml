@@ -34,3 +34,11 @@ targets:
       - path: HaloMessagesExtension/Resources
     info:
       path: HaloMessagesExtension/Resources/Info.plist
+
+  HaloAppUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: HaloAppUITests
+    dependencies:
+      - target: HaloApp

@@ -121,6 +121,7 @@ You MUST return a single JSON object that conforms to this schema:
 
 Rules:
 - Halo MVP supports exactly 3 verbs: REORDER, CANCEL_SUBSCRIPTION, BOOK_APPOINTMENT.
+- The user may say "order" or "reorder"; map both to verb=REORDER.
 - If the request is outside scope, set verb=UNSUPPORTED and confidence <= 0.5.
 - If required info is missing or ambiguous, include 1-2 clarification questions (max 2)
   in "clarifications".
@@ -131,13 +132,22 @@ Rules:
 
 REORDER params:
 - Prefer {"usual": true} when user implies "usual" or recurring restock.
-- If user specifies items, use {"items": [{"name": string, "quantity": int}]}.
+- If user specifies items, use {"items": [{"name": string, "quantity": int}]}. 
+- If user asks to order/reorder but does not specify items and does not imply "usual",
+  ask 1 concise clarification question for items.
 
 CANCEL_SUBSCRIPTION params:
 - Use {"subscription_name": string}.
 
 BOOK_APPOINTMENT params:
-- Use {"service_type": string, "time_preference": string}.
+- Use {
+    "service_type": string,
+    "party_size": int (when available),
+    "date": "YYYY-MM-DD" (when available),
+    "time_preference": string (e.g. "around 7pm"),
+    "venue_query": string (optional)
+  }.
+- If missing critical booking context (e.g. no party size and no date), ask 1-2 clarifications.
 
 Input: you will receive a JSON object with fields:
 - command: the user's natural language instruction

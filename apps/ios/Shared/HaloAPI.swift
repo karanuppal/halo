@@ -26,6 +26,10 @@ public struct HaloAPI {
         return try await post(path: "/v1/draft/confirm", body: req)
     }
 
+    public func getDraft(draftId: String) async throws -> CardV1 {
+        try await get(path: "/v1/drafts/\(draftId)")
+    }
+
     public func listExecutions(householdId: String) async throws -> [ExecutionListItem] {
         var comps = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
         comps?.path = "/v1/executions"

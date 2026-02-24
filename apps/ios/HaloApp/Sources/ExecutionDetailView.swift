@@ -28,15 +28,33 @@ struct ExecutionDetailView: View {
                             .textSelection(.enabled)
                     }
 
+                    Section("Normalized Intent JSON") {
+                        Text(prettyJSON(detail.normalizedIntentJson))
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+
+                    Section("Draft Payload JSON") {
+                        Text(prettyJSON(detail.draftPayloadJson))
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+
+                    Section("Execution Payload JSON") {
+                        Text(prettyJSON(detail.executionPayloadJson))
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+
                     Section("Receipts") {
                         if detail.receipts.isEmpty {
                             Text("No receipts")
                         }
-                        ForEach(detail.receipts) { r in
+                        ForEach(detail.receipts) { receipt in
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(r.type).font(.headline)
-                                Text(r.contentText).font(.caption)
-                                if let ext = r.externalReferenceId {
+                                Text(receipt.type).font(.headline)
+                                Text(receipt.contentText).font(.caption)
+                                if let ext = receipt.externalReferenceId {
                                     Text("Ref: \(ext)").font(.caption2).foregroundStyle(.secondary)
                                 }
                             }
@@ -51,7 +69,11 @@ struct ExecutionDetailView: View {
                     }
                 }
             } else if let errorText {
-                ContentUnavailableView("Couldn’t Load Execution", systemImage: "exclamationmark.triangle", description: Text(errorText))
+                ContentUnavailableView(
+                    "Couldn’t Load Execution",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(errorText)
+                )
             } else {
                 ProgressView()
             }
@@ -72,6 +94,20 @@ struct ExecutionDetailView: View {
             errorText = nil
         } catch {
             errorText = String(describing: error)
+        }
+    }
+
+    private func prettyJSON(_ value: [String: AnyCodable]) -> String {
+        let raw = value.mapValues { $0.value }
+        guard JSONSerialization.isValidJSONObject(raw) else {
+            return String(describing: raw)
+        }
+
+        do {
+            let data = try JSONSerialization.data(withJSONObject: raw, options: [.prettyPrinted, .sortedKeys])
+            return String(data: data, encoding: .utf8) ?? String(describing: raw)
+        } catch {
+            return String(describing: raw)
         }
     }
 }
