@@ -144,6 +144,13 @@ def confirm_draft(payload: DraftConfirmRequest, db: Session = Depends(get_db)) -
             event_type="EXECUTION_FAILED",
             event_payload={"error": str(e)},
         )
+        _emit_autopilot_signal(
+            db,
+            draft=draft,
+            execution=execution,
+            household_id=household_id,
+            user_id=payload.user_id or request_user_id,
+        )
         db.commit()
 
         return CardV1(
@@ -162,6 +169,16 @@ def confirm_draft(payload: DraftConfirmRequest, db: Session = Depends(get_db)) -
             ],
             warnings=[],
         )
+
+
+@router.get("/v1/drafts/{draft_id}", response_model=CardV1)
+def get_draft(draft_id: str, db: Session = Depends(get_db)) -> CardV1:
+    draft = db.get(Draft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found")
+
+    household_id, request_user_id = _draft_context(db, draft)
+    return _draft_to_card(db, draft, household_id, request_user_id)
 
 
 def _modify_reorder(db: Session, draft: Draft, modifications: dict) -> CardV1:
@@ -349,6 +366,13 @@ def _execute_reorder(db: Session, draft: Draft, execution: Execution) -> CardV1:
         event_type="RECEIPT_CREATED",
         event_payload={"type": "ORDER_RECEIPT", "external_reference_id": result.receipt_id},
     )
+    _emit_autopilot_signal(
+        db,
+        draft=draft,
+        execution=execution,
+        household_id=household_id,
+        user_id=request_user_id,
+    )
 
     db.commit()
 
@@ -419,6 +443,13 @@ def _execute_cancel_subscription(db: Session, draft: Draft, execution: Execution
         entity_id=receipt_row_id,
         event_type="RECEIPT_CREATED",
         event_payload={"type": "CANCEL_CONFIRMATION", "external_reference_id": confirmation_id},
+    )
+    _emit_autopilot_signal(
+        db,
+        draft=draft,
+        execution=execution,
+        household_id=household_id,
+        user_id=request_user_id,
     )
 
     db.commit()
@@ -505,6 +536,13 @@ def _execute_book_appointment(db: Session, draft: Draft, execution: Execution) -
             "external_reference_id": result.external_reference_id or result.confirmation_id,
         },
     )
+    _emit_autopilot_signal(
+        db,
+        draft=draft,
+        execution=execution,
+        household_id=household_id,
+        user_id=request_user_id,
+    )
 
     db.commit()
 
@@ -565,7 +603,10 @@ def _draft_to_card(db: Session, draft: Draft, household_id: str, request_user_id
             draft_id=draft.id,
             vendor=draft.vendor,
             estimated_cost_cents=None,
-            body=sub,
+            body={
+                **sub,
+                "available_subscriptions": payload.get("available_subscriptions") or [],
+            },
             actions=[
                 CardActionV1(type=CardActionTypeV1.CONFIRM, label="Confirm", payload={}),
                 CardActionV1(type=CardActionTypeV1.MODIFY, label="Modify", payload={}),
@@ -632,6 +673,194 @@ def _log_event(
             event_payload_json=event_payload,
         )
     )
+
+
+def _emit_autopilot_signal(
+    db: Session,
+    *,
+    draft: Draft,
+    execution: Execution,
+    household_id: str,
+    user_id: str | None,
+) -> None:
+    """Best-effort autopilot-readiness telemetry.
+
+    This must never block user-visible execution flow.
+    """
+
+    try:
+        db.flush()
+
+        routine_key = _routine_key_from_draft(draft)
+
+        rows = (
+            db.query(Execution, Draft, ExecutionRequest)
+            .join(Draft, Draft.id == Execution.draft_id)
+            .join(ExecutionRequest, ExecutionRequest.id == Draft.execution_request_id)
+            .filter(ExecutionRequest.household_id == household_id)
+            .order_by(Execution.started_at.asc())
+            .all()
+        )
+
+        routine_done: list[tuple[Execution, Draft]] = []
+        adapter_total = 0
+        adapter_failed = 0
+
+        for hist_execution, hist_draft, hist_req in rows:
+            if hist_draft.vendor == draft.vendor:
+                adapter_total += 1
+                if hist_execution.status == "FAILED":
+                    adapter_failed += 1
+
+            hist_key = str((hist_req.normalized_intent_json or {}).get("routine_key") or "")
+            if hist_key != routine_key or hist_execution.id == execution.id:
+                continue
+
+            if hist_execution.status == "DONE" and hist_execution.finished_at is not None:
+                routine_done.append((hist_execution, hist_draft))
+
+        repeats_count = len(routine_done) + (1 if execution.status == "DONE" else 0)
+
+        completed_times = [hist_execution.finished_at for hist_execution, _ in routine_done]
+        completed_times = [t for t in completed_times if t is not None]
+        completed_times.sort()
+
+        reference_time = (
+            execution.finished_at if execution.status == "DONE" else execution.started_at
+        )
+        time_since_last_completion_ms: int | None = None
+        if completed_times and reference_time is not None:
+            time_since_last_completion_ms = int(
+                (reference_time - completed_times[-1]).total_seconds() * 1000
+            )
+
+        series = list(completed_times)
+        if execution.status == "DONE" and execution.finished_at is not None:
+            series.append(execution.finished_at)
+
+        average_interval_ms: int | None = None
+        if len(series) >= 2:
+            intervals = [
+                int((series[i] - series[i - 1]).total_seconds() * 1000)
+                for i in range(1, len(series))
+            ]
+            average_interval_ms = int(sum(intervals) / len(intervals))
+
+        current_items = _item_quantities_from_payload(draft.draft_payload_json or {})
+        prev_items = (
+            _item_quantities_from_payload(routine_done[-1][1].draft_payload_json or {})
+            if routine_done
+            else {}
+        )
+        item_changes_count = (
+            _item_change_count(current_items, prev_items) if current_items else None
+        )
+
+        previous_costs = [
+            hist_execution.final_cost_cents
+            for hist_execution, _ in routine_done
+            if hist_execution.final_cost_cents is not None
+        ]
+        baseline_cost_cents = (
+            int(sum(previous_costs) / len(previous_costs)) if previous_costs else None
+        )
+        cost_deviation_cents: int | None = None
+        if execution.final_cost_cents is not None and baseline_cost_cents is not None:
+            cost_deviation_cents = execution.final_cost_cents - baseline_cost_cents
+
+        confirmation = (
+            db.query(Confirmation)
+            .filter(Confirmation.draft_id == draft.id)
+            .order_by(Confirmation.confirmed_at.desc())
+            .first()
+        )
+        confirmation_latency_ms = confirmation.confirmation_latency_ms if confirmation else None
+
+        modify_count = (
+            db.query(EventLog)
+            .filter(
+                EventLog.entity_type == "Draft",
+                EventLog.entity_id == draft.id,
+                EventLog.event_type == "DRAFT_MODIFIED",
+            )
+            .count()
+        )
+
+        failure_rate = round(adapter_failed / adapter_total, 4) if adapter_total else 0.0
+
+        signal_payload = {
+            "routine_key": routine_key,
+            "status": execution.status,
+            "repeats_count": repeats_count,
+            "cadence": {
+                "time_since_last_completion_ms": time_since_last_completion_ms,
+                "average_interval_ms": average_interval_ms,
+            },
+            "variance": {
+                "item_changes_count": item_changes_count,
+                "baseline_cost_cents": baseline_cost_cents,
+                "cost_deviation_cents": cost_deviation_cents,
+            },
+            "trust": {
+                "confirmation_latency_ms": confirmation_latency_ms,
+                "modify_count_before_confirm": modify_count,
+            },
+            "adapter": {
+                "vendor": draft.vendor,
+                "failed_executions": adapter_failed,
+                "total_executions": adapter_total,
+                "failure_rate": failure_rate,
+            },
+        }
+
+        _log_event(
+            db,
+            household_id=household_id,
+            user_id=user_id,
+            entity_type="Execution",
+            entity_id=execution.id,
+            event_type="AUTOPILOT_SIGNAL_COMPUTED",
+            event_payload=signal_payload,
+        )
+    except Exception:
+        # Telemetry is best-effort; user-facing flow should never fail because of it.
+        return
+
+
+def _routine_key_from_draft(draft: Draft) -> str:
+    payload = draft.draft_payload_json or {}
+    intent = payload.get("intent") if isinstance(payload, dict) else {}
+    if isinstance(intent, dict):
+        rk = str(intent.get("routine_key") or "").strip()
+        if rk:
+            return rk
+    return f"{draft.verb}:UNKNOWN"
+
+
+def _item_quantities_from_payload(payload: dict) -> dict[str, int]:
+    out: dict[str, int] = {}
+    raw_items = payload.get("items") if isinstance(payload, dict) else None
+    if not isinstance(raw_items, list):
+        return out
+
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or "").strip().lower()
+        if not name:
+            continue
+        try:
+            qty = max(1, int(raw.get("quantity") or 1))
+        except Exception:
+            qty = 1
+        out[name] = qty
+
+    return out
+
+
+def _item_change_count(current: dict[str, int], previous: dict[str, int]) -> int:
+    keys = set(current) | set(previous)
+    return sum(abs(current.get(k, 0) - previous.get(k, 0)) for k in keys)
 
 
 def _raise_booking_http_error(e: Exception) -> None:

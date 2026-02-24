@@ -11,12 +11,14 @@ This checklist is owned by QA. It is the definition of done for the MVP.
 - Clarifications are bounded to 1 to 2 questions maximum.
 - Unsupported requests return a structured unsupported response, not a chat loop.
 - Every state transition is logged in an append-only event log.
+- Autopilot-readiness signals are logged as `AUTOPILOT_SIGNAL_COMPUTED` events (learning only).
 
 ## Verb: REORDER
 
 ### Backend
 
 - Given a vague command, intent extraction returns `REORDER` with a routine_key.
+- `order ...` and `reorder ...` both map to the same REORDER draft/confirm flow.
 - Draft includes:
   - Items and quantities
   - Estimated total

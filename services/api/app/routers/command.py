@@ -309,6 +309,15 @@ def _draft_cancel_subscription(
             "monthly_cost_cents": match.monthly_cost_cents,
             "renewal_date": match.renewal_date.isoformat(),
         },
+        "available_subscriptions": [
+            {
+                "id": s.id,
+                "name": s.name,
+                "monthly_cost_cents": s.monthly_cost_cents,
+                "renewal_date": s.renewal_date.isoformat(),
+            }
+            for s in subs
+        ],
         "warnings": warnings,
     }
 
@@ -344,7 +353,10 @@ def _draft_cancel_subscription(
         draft_id=draft_id,
         vendor="MOCK_SUBS",
         estimated_cost_cents=None,
-        body=draft_payload["subscription"],
+        body={
+            **draft_payload["subscription"],
+            "available_subscriptions": draft_payload["available_subscriptions"],
+        },
         actions=[
             CardActionV1(type=CardActionTypeV1.CONFIRM, label="Confirm", payload={}),
             CardActionV1(type=CardActionTypeV1.MODIFY, label="Modify", payload={}),

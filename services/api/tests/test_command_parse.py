@@ -20,6 +20,22 @@ def test_parse_reorder_usual_returns_intent() -> None:
     assert data["confidence"] > 0
 
 
+def test_parse_order_alias_maps_to_reorder() -> None:
+    resp = client.post(
+        "/v1/command/parse",
+        json={
+            "household_id": "hh-1",
+            "user_id": "u-1",
+            "raw_command_text": "order 2 paper towels",
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["verb"] == "REORDER"
+    assert data["params"]["items"][0]["name"] == "paper towels"
+    assert data["params"]["items"][0]["quantity"] == 2
+
+
 def test_parse_cancel_requires_subscription_name_or_clarification() -> None:
     resp = client.post(
         "/v1/command/parse",
@@ -51,3 +67,18 @@ def test_parse_cancel_with_answer_resolves_subscription() -> None:
     assert data["verb"] == "CANCEL_SUBSCRIPTION"
     assert data["params"]["subscription_name"] == "Netflix"
     assert data["clarifications"] == []
+
+
+def test_parse_unsupported_for_out_of_scope_request() -> None:
+    resp = client.post(
+        "/v1/command/parse",
+        json={
+            "household_id": "hh-1",
+            "user_id": "u-1",
+            "raw_command_text": "fix kitchen sink",
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["verb"] == "UNSUPPORTED"
+    assert data["confidence"] <= 0.5

@@ -291,41 +291,45 @@ class AmazonBrowserAdapter:
         delete_selector = 'input[value="Delete"][name^="submit.delete."]'
 
         for _ in range(25):
-            if page.query_selector(delete_selector) is None:
+            if page.locator(delete_selector).count() == 0:
                 break
-            page.click(delete_selector)
-            page.wait_for_timeout(750)
+            _click_first_with_retry(
+                page,
+                selectors=(delete_selector,),
+                description="delete cart item",
+                attempts=3,
+                wait_after_ms=600,
+            )
 
     def _add_to_cart(self, page: Any, product_url: str, quantity: int) -> None:
         page.goto(product_url, wait_until="domcontentloaded")
 
-        if page.query_selector("select#quantity") is not None:
+        if page.locator("select#quantity").count() > 0:
             try:
                 page.select_option("select#quantity", str(quantity))
             except Exception:
                 pass
 
-        for sel in ("#add-to-cart-button", "input#add-to-cart-button"):
-            btn = page.query_selector(sel)
-            if btn is not None:
-                btn.click()
-                page.wait_for_timeout(1500)
-                return
-
-        raise RuntimeError("Could not find add-to-cart button")
+        _click_first_with_retry(
+            page,
+            selectors=("#add-to-cart-button", "input#add-to-cart-button"),
+            description="add to cart",
+            attempts=4,
+            wait_after_ms=1200,
+        )
 
     def _proceed_to_checkout(self, page: Any) -> None:
-        selectors = ('input[name="proceedToRetailCheckout"]', "#sc-buy-box-ptc-button input")
-
-        for sel in selectors:
-            btn = page.query_selector(sel)
-            if btn is None:
-                continue
-            btn.click()
-            page.wait_for_load_state("domcontentloaded")
-            return
-
-        raise RuntimeError("Could not find proceed-to-checkout button")
+        _click_first_with_retry(
+            page,
+            selectors=(
+                'input[name="proceedToRetailCheckout"]',
+                "#sc-buy-box-ptc-button input",
+            ),
+            description="proceed to checkout",
+            attempts=4,
+            wait_after_ms=1000,
+        )
+        page.wait_for_load_state("domcontentloaded")
 
     def _best_effort_read_total_cents(self, page: Any) -> int | None:
         selectors = (
@@ -346,21 +350,50 @@ class AmazonBrowserAdapter:
         return None
 
     def _place_order(self, page: Any) -> None:
-        selectors = (
-            "#placeYourOrder input",
-            "input#placeYourOrder",
-            'input[name="placeYourOrder1"]',
+        _click_first_with_retry(
+            page,
+            selectors=(
+                "#placeYourOrder input",
+                "input#placeYourOrder",
+                'input[name="placeYourOrder1"]',
+            ),
+            description="place order",
+            attempts=2,
+            wait_after_ms=1000,
         )
+        page.wait_for_load_state("domcontentloaded")
 
+
+def _click_first_with_retry(
+    page: Any,
+    *,
+    selectors: tuple[str, ...],
+    description: str,
+    attempts: int,
+    wait_after_ms: int,
+) -> None:
+    last_err: Exception | None = None
+
+    for attempt in range(attempts):
         for sel in selectors:
-            btn = page.query_selector(sel)
-            if btn is None:
+            locator = page.locator(sel).first
+            try:
+                if locator.count() == 0:
+                    continue
+                locator.click(timeout=15_000)
+                if wait_after_ms > 0:
+                    page.wait_for_timeout(wait_after_ms)
+                return
+            except Exception as e:
+                last_err = e
                 continue
-            btn.click()
-            page.wait_for_load_state("domcontentloaded")
-            return
 
-        raise RuntimeError("Could not find place-order button")
+        # Small backoff for transient DOM updates.
+        page.wait_for_timeout(250 * (attempt + 1))
+
+    raise RuntimeError(
+        f"Could not {description} using selectors={selectors!r}. Last error: {last_err}"
+    )
 
 
 def _sync_playwright() -> Any:
