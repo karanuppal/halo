@@ -4,14 +4,15 @@ options:
   deploymentTarget:
     iOS: "17.0"
 
-settings:
-  base:
-    PRODUCT_NAME: Halo
-
 targets:
   HaloApp:
     type: application
     platform: iOS
+    settings:
+      base:
+        PRODUCT_NAME: Halo
+        SWIFT_MODULE_NAME: HaloApp
+        PRODUCT_BUNDLE_IDENTIFIER: com.karanuppal.HaloApp
     sources:
       - path: HaloApp/Sources
       - path: Shared
@@ -27,6 +28,11 @@ targets:
     type: app-extension
     platform: iOS
     productType: com.apple.product-type.app-extension.messages
+    settings:
+      base:
+        PRODUCT_NAME: HaloMessagesExtension
+        SWIFT_MODULE_NAME: HaloMessagesExtension
+        PRODUCT_BUNDLE_IDENTIFIER: com.karanuppal.HaloApp.HaloMessagesExtension
     sources:
       - path: HaloMessagesExtension/Sources
       - path: Shared
@@ -34,10 +40,23 @@ targets:
       - path: HaloMessagesExtension/Resources
     info:
       path: HaloMessagesExtension/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: Halo
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.message-payload-provider
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).MessagesViewController
+          NSExtensionAttributes:
+            MSMessagesAppPresentationStyle: compact
 
   HaloAppUITests:
     type: bundle.ui-testing
     platform: iOS
+    settings:
+      base:
+        PRODUCT_NAME: HaloAppUITests
+        SWIFT_MODULE_NAME: HaloAppUITests
+        PRODUCT_BUNDLE_IDENTIFIER: com.karanuppal.HaloAppUITests
+        GENERATE_INFOPLIST_FILE: "YES"
     sources:
       - path: HaloAppUITests
     dependencies:

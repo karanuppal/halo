@@ -52,6 +52,14 @@ uv run ruff format --check .
 uv run pytest
 ```
 
+## Automated MVP Acceptance Test (Backend)
+
+```bash
+make backend.acceptance
+```
+
+Covers: REORDER, CANCEL, BOOK (with Modify), and UNSUPPORTED flows end-to-end against the local API in mock-safe mode.
+
 ## LLM Intent Extraction (OpenAI)
 
 Default extractor is deterministic fake.
@@ -234,14 +242,21 @@ Build app:
 
 ```bash
 xcodebuild -project Halo.xcodeproj -scheme HaloApp \
-  -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build
+  -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.4' build
 ```
 
 Run UI smoke tests:
 
 ```bash
 xcodebuild -project Halo.xcodeproj -scheme HaloApp \
-  -destination 'platform=iOS Simulator,name=iPhone 16 Pro' test
+  -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.4' test
+```
+
+Or from repo root:
+
+```bash
+make ios.build
+make ios.test
 ```
 
 If build/test fails with an iOS platform error, install the required iOS platform/runtime in:
