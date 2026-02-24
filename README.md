@@ -23,6 +23,7 @@ uv run uvicorn services.api.app.main:app --host 127.0.0.1 --port 8000 --reload
 uv run ruff check .
 uv run ruff format --check .
 uv run pytest
+make backend.acceptance
 ```
 
 ## LLM Provider
@@ -104,8 +105,12 @@ xcodegen generate
 Build/test:
 
 ```bash
-xcodebuild -project Halo.xcodeproj -scheme HaloApp -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build
-xcodebuild -project Halo.xcodeproj -scheme HaloApp -destination 'platform=iOS Simulator,name=iPhone 16 Pro' test
+xcodebuild -project Halo.xcodeproj -scheme HaloApp -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.4' build
+xcodebuild -project Halo.xcodeproj -scheme HaloApp -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.4' test
+
+# or from repo root
+make ios.build
+make ios.test
 ```
 
 If Xcode reports a missing iOS platform/runtime, install it from Xcode Components.
